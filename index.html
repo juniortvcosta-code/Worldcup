@@ -455,7 +455,7 @@
     <div class="tab-pane on" id="pane-picks">
       <div class="page-hdr">
         <h2>🎯 My Predictions</h2>
-        <p>Pick scores for every match. Changes lock 30 min before kickoff.</p>
+        <p id="picks-subtitle">Pick scores for every match. Changes lock 5 min before kickoff.</p>
       </div>
       <div class="legend">
         <div class="legend-item">
@@ -466,7 +466,7 @@
         <div class="legend-item">
           <span style="color:var(--green-l)">✓</span>
           <strong style="color:var(--green-l)">1 pt</strong>
-          <span style="color:var(--muted)">Correct Winner</span>
+          <span style="color:var(--muted)">Correct Result</span>
         </div>
         <div class="legend-item">
           <span style="color:var(--red)">✗</span>
@@ -521,6 +521,10 @@ let scores = {};    // gameId → { home, away }  (live input state)
 let unsubGames, unsubBoard;
 let isRegistering = false; // blocks onAuthStateChanged during signup
 let showPending = false;   // triggers pending message on next signout
+
+// ─── CHANGE THIS to adjust how many minutes before kickoff picks are locked ───
+const LOCK_MINUTES = 5;
+// ──────────────────────────────────────────────────────────────────────────────
 
 /* ════════════════════════════════════════
    BOOT
@@ -623,6 +627,8 @@ function doSignOut() {
    REAL-TIME LISTENERS
 ════════════════════════════════════════ */
 function startListeners() {
+  el('picks-subtitle').textContent =
+    `Pick scores for every match. Changes lock ${LOCK_MINUTES} min before kickoff.`;
   // Games listener
   unsubGames = db.collection('games').orderBy('kickoff').onSnapshot(async snap => {
     games = {};
@@ -686,7 +692,7 @@ function renderGames() {
 function gameCard(g) {
   const now    = Date.now();
   const kick   = g.kickoff.toDate().getTime();
-  const lock   = kick - 30 * 60 * 1000;
+  const lock   = kick - LOCK_MINUTES * 60 * 1000;
   const locked = now >= lock;
   const done   = g.status === 'finished';
   const pred   = myPreds[g.id];
@@ -818,6 +824,18 @@ function adj(gid, side, d) {
 }
 
 async function savePick(gid) {
+  // Re-check lock at save time so a stale open card cannot bypass the deadline
+  const game = games[gid];
+  if (game) {
+    const kick = game.kickoff.toDate().getTime();
+    if (Date.now() >= kick - LOCK_MINUTES * 60 * 1000) {
+      toast(`⛔ Picks are locked — less than ${LOCK_MINUTES} min to kickoff.`, 'err');
+      await refreshMyPreds();
+      renderGames(); // refresh card to show locked state
+      return;
+    }
+  }
+
   if (!scores[gid]) {
     const hEl = document.getElementById(`sh-${gid}`);
     const aEl = document.getElementById(`sa-${gid}`);
