@@ -436,10 +436,13 @@
   <nav class="navbar">
     <div class="nav-brand">⚽ WC 2026</div>
     <div class="nav-tabs">
-      <button class="ntab on" id="nt-picks"  onclick="showPane('picks')">
+      <button class="ntab on" id="nt-picks" onclick="showPane('picks')">
         🎯 <span>My Picks</span>
       </button>
-      <button class="ntab"    id="nt-board"  onclick="showPane('board')">
+      <button class="ntab" id="nt-allpicks" onclick="showPane('allpicks')">
+        👁 <span>All Picks</span>
+      </button>
+      <button class="ntab" id="nt-board" onclick="showPane('board')">
         🏆 <span>Standings</span>
       </button>
     </div>
@@ -476,6 +479,17 @@
       </div>
       <div id="games-wrap">
         <div class="empty"><div class="spin"></div><p style="margin-top:14px">Loading matches…</p></div>
+      </div>
+    </div>
+
+    <!-- ALL PICKS pane -->
+    <div class="tab-pane" id="pane-allpicks">
+      <div class="page-hdr">
+        <h2>👁 All Picks</h2>
+        <p>Everyone's predictions for locked games. Disappears once the admin scores the match.</p>
+      </div>
+      <div id="allpicks-wrap">
+        <div class="empty"><div class="spin"></div></div>
       </div>
     </div>
 
@@ -518,9 +532,11 @@ let me = null, myProfile = null;
 let games = {};     // gameId → game
 let myPreds = {};   // gameId → prediction doc {id, predHome, predAway, points, resultType}
 let scores = {};    // gameId → { home, away }  (live input state)
-let unsubGames, unsubBoard;
+let unsubGames, unsubBoard, unsubAllPreds;
 let isRegistering = false; // blocks onAuthStateChanged during signup
 let showPending = false;   // triggers pending message on next signout
+let allGamePreds = {};  // gameId → { userId → { predHome, predAway } }
+let playerProfiles = {}; // userId → user data (for All Picks names)
 
 // ─── CHANGE THIS to adjust how many minutes before kickoff picks are locked ───
 const LOCK_MINUTES = 5;
@@ -633,24 +649,41 @@ function startListeners() {
   unsubGames = db.collection('games').orderBy('kickoff').onSnapshot(async snap => {
     games = {};
     snap.forEach(d => { games[d.id] = { id: d.id, ...d.data() }; });
-    // Fetch my predictions fresh (not real-time to avoid re-fetching on every tiny change)
     await refreshMyPreds();
     renderGames();
+    renderAllPicks();
   });
 
-  // Leaderboard listener
+  // Leaderboard + player profiles listener
   unsubBoard = db.collection('users')
     .orderBy('totalPoints', 'desc')
     .onSnapshot(snap => {
+      playerProfiles = {};
       const users = [];
-      snap.forEach(d => users.push({ id: d.id, ...d.data() }));
+      snap.forEach(d => {
+        playerProfiles[d.id] = d.data();
+        users.push({ id: d.id, ...d.data() });
+      });
       renderBoard(users);
+      renderAllPicks();
     });
+
+  // All predictions listener (for All Picks tab)
+  unsubAllPreds = db.collection('predictions').onSnapshot(snap => {
+    allGamePreds = {};
+    snap.forEach(d => {
+      const p = d.data();
+      if (!allGamePreds[p.gameId]) allGamePreds[p.gameId] = {};
+      allGamePreds[p.gameId][p.userId] = { predHome: p.predHome, predAway: p.predAway };
+    });
+    renderAllPicks();
+  });
 }
 
 function stopListeners() {
-  if (unsubGames)  { unsubGames();  unsubGames = null; }
-  if (unsubBoard)  { unsubBoard(); unsubBoard = null; }
+  if (unsubGames)    { unsubGames();    unsubGames = null; }
+  if (unsubBoard)    { unsubBoard();    unsubBoard = null; }
+  if (unsubAllPreds) { unsubAllPreds(); unsubAllPreds = null; }
 }
 
 async function refreshMyPreds() {
@@ -736,7 +769,7 @@ function gameCard(g) {
           <div class="team-name">${g.homeTeam}</div></div>
         <div style="text-align:center;flex-shrink:0">
           ${pred
-            ? `<div class="locked-score">${ph}<span class="sep"> – </span>${pa}</div>
+            ? `<div class="locked-score">${pred.predHome}<span class="sep"> – </span>${pred.predAway}</div>
                <div style="font-size:11px;color:var(--muted);margin-top:3px">Your pick</div>`
             : `<div style="font-size:15px;color:var(--muted)">No pick</div>`}
         </div>
@@ -775,7 +808,7 @@ function gameCard(g) {
         rt === 'exact'   ? ['res-exact',   `★ Exact Score · +${pred.points} pts`] :
         rt === 'outcome' ? ['res-outcome',  `✓ Correct Result · +${pred.points} pt`] :
         rt === 'wrong'   ? ['res-wrong',    `✗ Wrong · +0 pts`] :
-                           ['res-pending',  `Your pick: ${ph}–${pa} · Calculating…`];
+                           ['res-pending',  `Your pick: ${pred.predHome}–${pred.predAway} · Calculating…`];
       foot = `
         <div class="gfoot">
           <div class="lock-info">🏁 Full time</div>
@@ -829,9 +862,10 @@ async function savePick(gid) {
   if (game) {
     const kick = game.kickoff.toDate().getTime();
     if (Date.now() >= kick - LOCK_MINUTES * 60 * 1000) {
+      delete scores[gid];   // discard stale input so card shows the real saved pick
       toast(`⛔ Picks are locked — less than ${LOCK_MINUTES} min to kickoff.`, 'err');
       await refreshMyPreds();
-      renderGames(); // refresh card to show locked state
+      renderGames();
       return;
     }
   }
@@ -866,6 +900,87 @@ async function savePick(gid) {
     toast('Error saving pick', 'err');
     console.error(e);
   }
+}
+
+/* ════════════════════════════════════════
+   ALL PICKS
+════════════════════════════════════════ */
+function renderAllPicks() {
+  const wrap = el('allpicks-wrap');
+  if (!wrap) return;
+
+  // Only show locked but not yet finished games
+  const lockedGames = Object.values(games)
+    .filter(g => {
+      const kick = g.kickoff.toDate().getTime();
+      return Date.now() >= kick - LOCK_MINUTES * 60 * 1000 && g.status !== 'finished';
+    })
+    .sort((a, b) => a.kickoff.toDate() - b.kickoff.toDate());
+
+  if (!lockedGames.length) {
+    wrap.innerHTML = `<div class="empty">
+      <span class="icon">🔒</span>
+      <p>No locked games at the moment.</p>
+      <p style="font-size:13px;margin-top:6px;color:var(--muted)">
+        Picks for locked games appear here until the admin enters the final score.
+      </p></div>`;
+    return;
+  }
+
+  // Sorted list of approved players
+  const players = Object.entries(playerProfiles)
+    .filter(([, p]) => p.approved || p.isAdmin)
+    .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''));
+
+  wrap.innerHTML = lockedGames.map(g => {
+    const kick    = g.kickoff.toDate();
+    const timeStr = kick.toLocaleTimeString('en-US',
+      { hour:'numeric', minute:'2-digit', timeZoneName:'short' });
+    const gamePreds = allGamePreds[g.id] || {};
+    const picksCount = Object.keys(gamePreds).length;
+
+    const rows = players.map(([uid, profile]) => {
+      const p     = gamePreds[uid];
+      const isMe  = uid === me?.uid;
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          padding:9px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:14px;font-weight:${isMe ? '800' : '600'};
+            color:${isMe ? 'var(--green-l)' : 'white'}">
+            ${profile.name || profile.email}${isMe ? ' <span class="you-tag">YOU</span>' : ''}
+          </span>
+          <span style="font-size:15px;font-weight:700;color:${p ? 'white' : 'var(--muted)'}">
+            ${p ? `${p.predHome} – ${p.predAway}` : '—'}
+          </span>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="gcard" style="margin-bottom:16px">
+        <div class="gmeta">
+          <span class="phase-badge">${g.phase || 'Group Stage'}</span>
+          ${g.group ? `<span class="dot3"></span><span>${g.group}</span>` : ''}
+          <span class="dot3"></span><span>${timeStr}</span>
+          ${g.venue ? `<span class="dot3"></span><span>${g.venue}</span>` : ''}
+          <span class="dot3"></span>
+          <span style="color:var(--muted)">${picksCount}/${players.length} picks submitted</span>
+        </div>
+        <div class="gteams" style="margin-bottom:12px">
+          <div class="team">
+            <span class="team-flag">${g.homeFlag || '🏳️'}</span>
+            <div class="team-name">${g.homeTeam}</div>
+          </div>
+          <div style="font-size:20px;font-weight:800;color:var(--muted);flex-shrink:0">vs</div>
+          <div class="team">
+            <span class="team-flag">${g.awayFlag || '🏳️'}</span>
+            <div class="team-name">${g.awayTeam}</div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:4px">
+          ${players.length ? rows : '<p style="color:var(--muted);font-size:13px;text-align:center;padding:12px 0">No approved players yet.</p>'}
+        </div>
+      </div>`;
+  }).join('');
 }
 
 /* ════════════════════════════════════════
@@ -908,7 +1023,7 @@ function showView(name) {
 }
 
 function showPane(name) {
-  ['picks','board'].forEach(n => {
+  ['picks','allpicks','board'].forEach(n => {
     el('pane-'+n).classList.toggle('on', n===name);
     el('nt-'+n).classList.toggle('on', n===name);
   });
