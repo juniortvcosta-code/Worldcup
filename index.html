@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>⚽ World Cup 2026 Predictor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:      #080F1D;
+      --surface: #0F1B30;
+      --card:    #162440;
+      --border:  rgba(255,255,255,.09);
+      --green:   #00A651;
+      --green-d: #007A3D;
+      --green-l: #00C962;
+      --gold:    #FFD700;
+      --teal:    #0EA5C0;
+      --red:     #EF4444;
+      --amber:   #F59E0B;
+      --text:    rgba(255,255,255,.9);
+      --muted:   rgba(255,255,255,.48);
+      --r:       14px;
+      --r-sm:    8px;
+    }
+    *,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      font-family:'Inter',system-ui,sans-serif;
+      background:var(--bg); color:var(--text);
+      min-height:100vh; overflow-x:hidden;
+    }
+
+    /* ── VIEW SWITCHER ─────────────────────────────── */
+    .view { display:none; flex-direction:column; min-height:100vh; }
+    .view.active { display:flex; }
+
+    /* ── AUTH PAGE ─────────────────────────────────── */
+    .auth-wrap {
+      flex:1; display:flex; align-items:center; justify-content:center;
+      padding:24px;
+      background: radial-gradient(ellipse at top, #0B3D1A 0%, var(--bg) 65%);
+    }
+    .auth-card {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:22px; padding:44px 38px;
+      width:100%; max-width:400px;
+      box-shadow:0 32px 80px rgba(0,0,0,.5);
+    }
+    .auth-logo { text-align:center; margin-bottom:32px; }
+    .auth-logo .ball { font-size:54px; display:block; line-height:1; margin-bottom:10px; }
+    .auth-logo h1 { font-size:1.45rem; font-weight:800; color:white; }
+    .auth-logo p  { font-size:13px; color:var(--muted); margin-top:4px; }
+
+    .tabs {
+      display:grid; grid-template-columns:1fr 1fr; gap:4px;
+      background:var(--card); border-radius:10px;
+      padding:4px; margin-bottom:24px;
+    }
+    .tab {
+      padding:10px; border-radius:7px; border:none;
+      background:transparent; color:var(--muted);
+      font-size:14px; font-weight:600; cursor:pointer;
+      font-family:inherit; transition:all .2s;
+    }
+    .tab.on { background:var(--green); color:white; }
+
+    .fg { margin-bottom:16px; }
+    .fg label {
+      display:block; font-size:12px; font-weight:700;
+      color:var(--muted); text-transform:uppercase; letter-spacing:.6px;
+      margin-bottom:7px;
+    }
+    .fg input {
+      width:100%; background:var(--card); border:1.5px solid var(--border);
+      border-radius:var(--r-sm); padding:12px 14px;
+      color:white; font-size:15px; font-family:inherit; outline:none;
+      transition:border-color .2s;
+    }
+    .fg input:focus { border-color:var(--green); }
+
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      gap:8px; border:none; cursor:pointer; font-family:inherit;
+      font-weight:700; border-radius:var(--r-sm); transition:all .25s;
+    }
+    .btn-block { width:100%; padding:14px; font-size:15px; }
+    .btn-green  { background:var(--green); color:white; box-shadow:0 8px 24px rgba(0,166,81,.35); }
+    .btn-green:hover  { background:var(--green-l); transform:translateY(-1px); }
+    .btn-green:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+    .btn-sm { padding:8px 16px; font-size:13px; }
+    .btn-outline { background:transparent; color:var(--muted); border:1.5px solid var(--border); }
+    .btn-outline:hover { border-color:rgba(255,255,255,.3); color:white; }
+    .err { color:var(--red); font-size:13px; text-align:center; margin-top:12px; min-height:18px; }
+
+    /* ── NAVBAR ─────────────────────────────────────── */
+    .navbar {
+      background:var(--surface); border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between;
+      padding:0 20px; height:60px;
+      position:sticky; top:0; z-index:100;
+      backdrop-filter:blur(12px);
+    }
+    .nav-brand { display:flex; align-items:center; gap:8px; font-weight:800; font-size:15px; color:white; }
+    .nav-tabs  { display:flex; gap:4px; }
+    .ntab {
+      padding:8px 18px; border-radius:var(--r-sm); background:transparent;
+      border:none; color:var(--muted); font-size:14px; font-weight:600;
+      cursor:pointer; font-family:inherit; transition:all .2s;
+    }
+    .ntab.on { background:var(--green); color:white; }
+    .ntab:hover:not(.on) { color:white; background:rgba(255,255,255,.07); }
+    .nav-right { display:flex; align-items:center; gap:10px; }
+    .avatar {
+      width:36px; height:36px; border-radius:50%;
+      background:var(--green-d); display:flex; align-items:center;
+      justify-content:center; font-size:14px; font-weight:800; color:white;
+      flex-shrink:0;
+    }
+    .signout-btn {
+      background:transparent; border:1px solid var(--border);
+      color:var(--muted); font-size:12px; padding:6px 12px;
+      border-radius:6px; cursor:pointer; font-family:inherit; transition:all .2s;
+    }
+    .signout-btn:hover { border-color:var(--red); color:var(--red); }
+
+    /* ── MAIN CONTENT ───────────────────────────────── */
+    .main { flex:1; padding:28px 20px; max-width:880px; margin:0 auto; width:100%; }
+    .tab-pane { display:none; }
+    .tab-pane.on { display:block; }
+
+    .page-hdr { margin-bottom:28px; }
+    .page-hdr h2 { font-size:1.4rem; font-weight:800; color:white; }
+    .page-hdr p  { color:var(--muted); font-size:14px; margin-top:4px; }
+
+    /* ── SCORING LEGEND ─────────────────────────────── */
+    .legend { display:flex; gap:10px; margin-bottom:22px; flex-wrap:wrap; }
+    .legend-item {
+      display:flex; align-items:center; gap:8px;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600;
+    }
+
+    /* ── DATE GROUPS ────────────────────────────────── */
+    .date-grp { margin-bottom:32px; }
+    .date-lbl {
+      font-size:11px; font-weight:700; text-transform:uppercase;
+      letter-spacing:1.5px; color:var(--green);
+      margin-bottom:12px; padding-bottom:8px;
+      border-bottom:1px solid var(--border);
+    }
+
+    /* ── GAME CARD ──────────────────────────────────── */
+    .gcard {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--r); padding:20px;
+      margin-bottom:12px; transition:border-color .2s;
+    }
+    .gcard:hover { border-color:rgba(255,255,255,.15); }
+    .gcard.finished { border-left:3px solid var(--green); }
+    .gcard.locked   { opacity:.88; }
+
+    .gmeta {
+      display:flex; align-items:center; gap:7px;
+      font-size:12px; color:var(--muted); margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+    .dot3 { width:3px; height:3px; background:var(--muted); border-radius:50%; flex-shrink:0; }
+    .phase-badge {
+      font-size:10.5px; font-weight:700;
+      background:rgba(14,165,192,.15); color:var(--teal);
+      padding:2px 8px; border-radius:100px;
+      text-transform:uppercase; letter-spacing:.5px;
+    }
+
+    /* teams row */
+    .gteams {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:12px; margin-bottom:16px;
+    }
+    .team { flex:1; text-align:center; }
+    .team-flag { font-size:30px; display:block; margin-bottom:5px; line-height:1; }
+    .team-name { font-size:12.5px; font-weight:700; color:white; }
+
+    /* score controls */
+    .score-vs { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+    .sctrl    { display:flex; flex-direction:column; align-items:center; gap:4px; }
+    .scbtn {
+      width:28px; height:28px; border-radius:6px;
+      border:1.5px solid var(--border); background:var(--card);
+      color:white; font-size:17px; cursor:pointer; line-height:1;
+      display:flex; align-items:center; justify-content:center;
+      transition:all .15s; font-family:inherit;
+    }
+    .scbtn:hover:not(:disabled) { border-color:var(--green); color:var(--green); }
+    .scbtn:disabled { opacity:.3; cursor:not-allowed; }
+    .scnum { font-size:28px; font-weight:800; color:white; width:40px; text-align:center; line-height:1; }
+    .scsep { font-size:22px; font-weight:800; color:var(--muted); }
+
+    /* game footer */
+    .gfoot {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:10px; flex-wrap:wrap;
+    }
+    .lock-info { font-size:12px; color:var(--muted); display:flex; align-items:center; gap:5px; }
+    .lock-info.amber { color:var(--amber); }
+
+    .res-badge {
+      font-size:12.5px; font-weight:700; padding:4px 12px;
+      border-radius:100px; white-space:nowrap;
+    }
+    .res-exact   { background:rgba(255,215,0,.14);   color:var(--gold); }
+    .res-outcome { background:rgba(0,166,81,.14);    color:var(--green-l); }
+    .res-wrong   { background:rgba(239,68,68,.1);    color:var(--red); }
+    .res-pending { background:rgba(255,255,255,.07); color:var(--muted); }
+    .res-nopick  { background:rgba(239,68,68,.1);    color:var(--red); }
+
+    /* locked score display */
+    .locked-score {
+      font-size:28px; font-weight:800; letter-spacing:-1px;
+      color:rgba(255,255,255,.55);
+    }
+    .locked-score .sep { color:var(--muted); }
+
+    /* final score display */
+    .final-score {
+      text-align:center; flex-shrink:0;
+    }
+    .final-score .sc {
+      font-size:30px; font-weight:800; color:white; letter-spacing:-1px;
+    }
+    .final-score .sc .sep { color:var(--muted); }
+    .final-score .lbl { font-size:11px; color:var(--muted); margin-top:2px; }
+
+    /* ── LEADERBOARD ────────────────────────────────── */
+    .lboard {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--r); overflow:hidden;
+    }
+    .lb-hdr, .lb-row {
+      display:grid;
+      grid-template-columns: 52px 1fr 72px 72px 72px;
+      padding:13px 20px;
+      align-items:center;
+    }
+    .lb-hdr {
+      border-bottom:1px solid var(--border);
+      font-size:11px; font-weight:700;
+      text-transform:uppercase; letter-spacing:1px; color:var(--muted);
+    }
+    .lb-row { border-bottom:1px solid var(--border); transition:background .15s; }
+    .lb-row:last-child { border-bottom:none; }
+    .lb-row:hover { background:rgba(255,255,255,.03); }
+    .lb-row.me { background:rgba(0,166,81,.08); }
+    .lb-rank { text-align:center; font-size:14px; font-weight:800; color:var(--muted); }
+    .lb-rank.g { color:#FFD700; font-size:20px; }
+    .lb-rank.s { color:#C0C0C0; font-size:20px; }
+    .lb-rank.b { color:#CD7F32; font-size:20px; }
+    .lb-name { font-size:14px; font-weight:600; color:white; }
+    .you-tag {
+      font-size:10px; font-weight:700; background:var(--green);
+      color:white; padding:1px 6px; border-radius:4px; margin-left:8px;
+    }
+    .lb-cell { text-align:center; font-size:15px; font-weight:700; }
+    .lb-cell.pts { color:var(--gold); font-size:17px; }
+    .lb-cell.ex  { color:var(--green-l); }
+    .lb-cell.ot  { color:var(--teal); }
+
+    /* ── EMPTY / LOADING ────────────────────────────── */
+    .empty {
+      text-align:center; padding:60px 20px; color:var(--muted);
+    }
+    .empty .icon { font-size:44px; display:block; margin-bottom:12px; }
+
+    /* ── SPINNER ────────────────────────────────────── */
+    .spin {
+      display:inline-block; width:20px; height:20px;
+      border:2.5px solid rgba(255,255,255,.2); border-top-color:white;
+      border-radius:50%; animation:rot .7s linear infinite;
+    }
+    @keyframes rot { to { transform:rotate(360deg); } }
+
+    /* ── TOAST ──────────────────────────────────────── */
+    .toast {
+      position:fixed; bottom:24px; left:50%;
+      transform:translateX(-50%) translateY(80px);
+      background:var(--card); border:1px solid var(--border);
+      border-radius:10px; padding:12px 24px;
+      font-size:14px; font-weight:600;
+      box-shadow:0 8px 32px rgba(0,0,0,.5);
+      z-index:9999; transition:transform .3s ease; white-space:nowrap;
+    }
+    .toast.show { transform:translateX(-50%) translateY(0); }
+    .toast.ok  { border-color:var(--green); color:var(--green-l); }
+    .toast.err { border-color:var(--red);   color:var(--red); }
+
+    /* ── SETUP SCREEN ───────────────────────────────── */
+    .setup-steps { display:flex; flex-direction:column; gap:14px; margin-top:20px; }
+    .step {
+      background:var(--card); border:1px solid var(--border);
+      border-radius:var(--r-sm); padding:16px;
+    }
+    .step h4 { font-size:13.5px; font-weight:700; color:white; margin-bottom:8px; }
+    .step p, .step li { font-size:13px; color:var(--muted); line-height:1.65; }
+    .step ol { padding-left:18px; }
+    code {
+      background:rgba(255,255,255,.08); padding:1px 6px;
+      border-radius:4px; font-family:monospace; font-size:12px; color:var(--teal);
+    }
+
+    /* ── RESPONSIVE ─────────────────────────────────── */
+    @media (max-width:600px) {
+      .lb-hdr, .lb-row { grid-template-columns:44px 1fr 60px 60px; }
+      .lb-hdr>:last-child, .lb-row>:last-child { display:none; }
+      .ntab span { display:none; }
+      .auth-card { padding:28px 20px; }
+      .scnum { font-size:24px; width:34px; }
+      .team-flag { font-size:24px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════
+     SETUP VIEW
+══════════════════════════════════ -->
+<div id="v-setup" class="view">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <span class="ball">⚽</span>
+        <h1>World Cup 2026 Predictor</h1>
+        <p>Firebase setup required before playing</p>
+      </div>
+      <div class="setup-steps">
+        <div class="step">
+          <h4>Step 1 — Create Firebase Project</h4>
+          <ol>
+            <li>Go to <code>console.firebase.google.com</code></li>
+            <li>Click "Add project", name it anything (e.g. <em>wc2026</em>)</li>
+            <li>Disable Analytics → Create project</li>
+          </ol>
+        </div>
+        <div class="step">
+          <h4>Step 2 — Enable Email/Password Auth</h4>
+          <ol>
+            <li>Authentication → Sign-in method</li>
+            <li>Enable <strong>Email/Password</strong> → Save</li>
+          </ol>
+        </div>
+        <div class="step">
+          <h4>Step 3 — Create Firestore Database</h4>
+          <ol>
+            <li>Firestore Database → Create database</li>
+            <li>Start in <strong>Test mode</strong> → pick region → Done</li>
+          </ol>
+        </div>
+        <div class="step">
+          <h4>Step 4 — Paste Your Config</h4>
+          <ol>
+            <li>Project Settings (⚙) → Your apps → Add web app (<code>&lt;/&gt;</code>)</li>
+            <li>Register, copy the <code>firebaseConfig</code> object</li>
+            <li>Open <code>firebase-config.js</code> and paste your values</li>
+            <li>Reload this page</li>
+          </ol>
+        </div>
+      </div>
+      <button class="btn btn-green btn-block" style="margin-top:22px" onclick="location.reload()">
+        ✓ I've configured Firebase — Reload
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     LOGIN VIEW
+══════════════════════════════════ -->
+<div id="v-login" class="view">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <span class="ball">⚽</span>
+        <h1>World Cup 2026</h1>
+        <p>Prediction Game — Sign in to play</p>
+      </div>
+
+      <div class="tabs">
+        <button class="tab on"  id="t-login" onclick="switchTab('login')">Sign In</button>
+        <button class="tab"     id="t-reg"   onclick="switchTab('reg')">Register</button>
+      </div>
+
+      <!-- Login form -->
+      <div id="f-login">
+        <div class="fg"><label>Email</label>
+          <input type="email" id="l-email" placeholder="you@example.com" /></div>
+        <div class="fg"><label>Password</label>
+          <input type="password" id="l-pass" placeholder="••••••••"
+            onkeydown="if(event.key==='Enter')doLogin()" /></div>
+        <button class="btn btn-green btn-block" id="l-btn" onclick="doLogin()">Sign In</button>
+        <div class="err" id="l-err"></div>
+      </div>
+
+      <!-- Register form -->
+      <div id="f-reg" style="display:none">
+        <div class="fg"><label>Your Name</label>
+          <input type="text" id="r-name" placeholder="e.g. Diego Rayas" /></div>
+        <div class="fg"><label>Email</label>
+          <input type="email" id="r-email" placeholder="you@example.com" /></div>
+        <div class="fg"><label>Password</label>
+          <input type="password" id="r-pass" placeholder="At least 6 characters"
+            onkeydown="if(event.key==='Enter')doRegister()" /></div>
+        <button class="btn btn-green btn-block" id="r-btn" onclick="doRegister()">Create Account</button>
+        <div class="err" id="r-err"></div>
+      </div>
+
+      <!-- Pending approval notice -->
+      <div id="msg-pending" style="display:none;margin-top:4px;padding:20px 16px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:10px;text-align:center">
+        <div style="font-size:28px;margin-bottom:8px">⏳</div>
+        <div style="font-size:15px;font-weight:700;color:var(--amber)">Account Pending Approval</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px;line-height:1.6">
+          Your registration was received.<br>The admin will approve your account shortly.
+        </div>
+        <button class="btn btn-outline btn-sm" style="margin-top:16px;width:100%" onclick="showLoginInstead()">← Back to Sign In</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     APP VIEW
+══════════════════════════════════ -->
+<div id="v-app" class="view">
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="nav-brand">⚽ WC 2026</div>
+    <div class="nav-tabs">
+      <button class="ntab on" id="nt-picks"  onclick="showPane('picks')">
+        🎯 <span>My Picks</span>
+      </button>
+      <button class="ntab"    id="nt-board"  onclick="showPane('board')">
+        🏆 <span>Standings</span>
+      </button>
+    </div>
+    <div class="nav-right">
+      <div class="avatar" id="nav-av"></div>
+      <button class="signout-btn" onclick="doSignOut()">Sign Out</button>
+    </div>
+  </nav>
+
+  <div class="main">
+
+    <!-- PICKS pane -->
+    <div class="tab-pane on" id="pane-picks">
+      <div class="page-hdr">
+        <h2>🎯 My Predictions</h2>
+        <p>Pick scores for every match. Changes lock 30 min before kickoff.</p>
+      </div>
+      <div class="legend">
+        <div class="legend-item">
+          <span style="color:var(--gold)">★</span>
+          <strong style="color:var(--gold)">3 pts</strong>
+          <span style="color:var(--muted)">Exact Score</span>
+        </div>
+        <div class="legend-item">
+          <span style="color:var(--green-l)">✓</span>
+          <strong style="color:var(--green-l)">1 pt</strong>
+          <span style="color:var(--muted)">Correct Result</span>
+        </div>
+        <div class="legend-item">
+          <span style="color:var(--red)">✗</span>
+          <strong style="color:var(--red)">0 pts</strong>
+          <span style="color:var(--muted)">Wrong</span>
+        </div>
+      </div>
+      <div id="games-wrap">
+        <div class="empty"><div class="spin"></div><p style="margin-top:14px">Loading matches…</p></div>
+      </div>
+    </div>
+
+    <!-- STANDINGS pane -->
+    <div class="tab-pane" id="pane-board">
+      <div class="page-hdr">
+        <h2>🏆 Standings</h2>
+        <p>Live rankings — updates automatically as results come in.</p>
+      </div>
+      <div class="lboard">
+        <div class="lb-hdr">
+          <div style="text-align:center">#</div>
+          <div>Player</div>
+          <div style="text-align:center">Pts</div>
+          <div style="text-align:center">Exact</div>
+          <div style="text-align:center">Result</div>
+        </div>
+        <div id="lb-body">
+          <div class="empty"><div class="spin"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+/* ════════════════════════════════════════
+   STATE
+════════════════════════════════════════ */
+let me = null, myProfile = null;
+let games = {};     // gameId → game
+let myPreds = {};   // gameId → prediction doc {id, predHome, predAway, points, resultType}
+let scores = {};    // gameId → { home, away }  (live input state)
+let unsubGames, unsubBoard;
+let isRegistering = false; // blocks onAuthStateChanged during signup
+let showPending = false;   // triggers pending message on next signout
+
+/* ════════════════════════════════════════
+   BOOT
+════════════════════════════════════════ */
+function isConfigured() {
+  return typeof firebaseConfig !== 'undefined' &&
+    !firebaseConfig.apiKey.startsWith('PASTE');
+}
+
+(function init() {
+  if (!isConfigured()) { showView('setup'); return; }
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  window.db = firebase.firestore();
+
+  showView('login');
+
+  auth.onAuthStateChanged(async user => {
+    if (isRegistering) return;
+    if (user) {
+      me = user;
+      const ref = db.collection('users').doc(user.uid);
+      const snap = await ref.get();
+      if (!snap.exists) { await firebase.auth().signOut(); return; }
+      myProfile = snap.data();
+      if (!myProfile.approved && !myProfile.isAdmin) {
+        showPending = true;
+        await firebase.auth().signOut();
+        return;
+      }
+      document.getElementById('nav-av').textContent =
+        (myProfile.name || user.email)[0].toUpperCase();
+      showView('app');
+      startListeners();
+    } else {
+      me = null; myProfile = null;
+      stopListeners();
+      showView('login');
+      if (showPending) {
+        el('msg-pending').style.display = 'block';
+        showPending = false;
+      }
+    }
+  });
+})();
+
+/* ════════════════════════════════════════
+   AUTH
+════════════════════════════════════════ */
+async function doLogin() {
+  const email = v('l-email'), pass = v('l-pass');
+  if (!email || !pass) return;
+  const btn = el('l-btn');
+  btn.disabled = true; btn.innerHTML = '<div class="spin"></div>';
+  el('l-err').textContent = '';
+  try {
+    await firebase.auth().signInWithEmailAndPassword(email, pass);
+    btn.disabled = false; btn.textContent = 'Sign In';
+  } catch (e) {
+    el('l-err').textContent = authErr(e.code);
+    btn.disabled = false; btn.textContent = 'Sign In';
+  }
+}
+
+async function doRegister() {
+  const name = v('r-name'), email = v('r-email'), pass = v('r-pass');
+  if (!name || !email || !pass) { el('r-err').textContent = 'All fields required.'; return; }
+  const btn = el('r-btn');
+  btn.disabled = true; btn.innerHTML = '<div class="spin"></div>';
+  el('r-err').textContent = '';
+  isRegistering = true;
+  try {
+    const cred = await firebase.auth().createUserWithEmailAndPassword(email, pass);
+    await cred.user.updateProfile({ displayName: name });
+    await db.collection('users').doc(cred.user.uid).set({
+      name, email,
+      isAdmin: false, approved: false,
+      totalPoints: 0, exactScores: 0, correctOutcomes: 0,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await firebase.auth().signOut();
+    isRegistering = false;
+    // Show pending notice, hide forms
+    document.querySelector('.tabs').style.display = 'none';
+    el('f-reg').style.display = 'none';
+    el('msg-pending').style.display = 'block';
+  } catch (e) {
+    isRegistering = false;
+    el('r-err').textContent = authErr(e.code);
+    btn.disabled = false; btn.textContent = 'Create Account';
+  }
+}
+
+function doSignOut() {
+  firebase.auth().signOut();
+}
+
+/* ════════════════════════════════════════
+   REAL-TIME LISTENERS
+════════════════════════════════════════ */
+function startListeners() {
+  // Games listener
+  unsubGames = db.collection('games').orderBy('kickoff').onSnapshot(async snap => {
+    games = {};
+    snap.forEach(d => { games[d.id] = { id: d.id, ...d.data() }; });
+    // Fetch my predictions fresh (not real-time to avoid re-fetching on every tiny change)
+    await refreshMyPreds();
+    renderGames();
+  });
+
+  // Leaderboard listener
+  unsubBoard = db.collection('users')
+    .orderBy('totalPoints', 'desc')
+    .onSnapshot(snap => {
+      const users = [];
+      snap.forEach(d => users.push({ id: d.id, ...d.data() }));
+      renderBoard(users);
+    });
+}
+
+function stopListeners() {
+  if (unsubGames)  { unsubGames();  unsubGames = null; }
+  if (unsubBoard)  { unsubBoard(); unsubBoard = null; }
+}
+
+async function refreshMyPreds() {
+  const snap = await db.collection('predictions')
+    .where('userId', '==', me.uid).get();
+  myPreds = {};
+  snap.forEach(d => { myPreds[d.data().gameId] = { id: d.id, ...d.data() }; });
+}
+
+/* ════════════════════════════════════════
+   RENDER GAMES
+════════════════════════════════════════ */
+function renderGames() {
+  const wrap = el('games-wrap');
+  const list = Object.values(games);
+  if (!list.length) {
+    wrap.innerHTML = `<div class="empty"><span class="icon">📅</span>
+      <p>No matches added yet.</p>
+      <p style="font-size:13px;margin-top:6px">The admin will add games soon.</p></div>`;
+    return;
+  }
+
+  // Group by calendar date
+  const byDate = {};
+  list.forEach(g => {
+    const d = g.kickoff.toDate().toDateString();
+    (byDate[d] = byDate[d] || []).push(g);
+  });
+
+  wrap.innerHTML = Object.entries(byDate)
+    .map(([dk, gs]) =>
+      `<div class="date-grp">
+         <div class="date-lbl">${fmtDateHdr(new Date(dk))}</div>
+         ${gs.map(gameCard).join('')}
+       </div>`)
+    .join('');
+}
+
+function gameCard(g) {
+  const now    = Date.now();
+  const kick   = g.kickoff.toDate().getTime();
+  const lock   = kick - 30 * 60 * 1000;
+  const locked = now >= lock;
+  const done   = g.status === 'finished';
+  const pred   = myPreds[g.id];
+
+  // Initialize score input state from existing prediction
+  if (!scores[g.id]) {
+    scores[g.id] = { home: pred ? pred.predHome : 0, away: pred ? pred.predAway : 0 };
+  }
+  const { home: ph, away: pa } = scores[g.id];
+
+  const timeStr = g.kickoff.toDate().toLocaleTimeString('en-US',
+    { hour:'numeric', minute:'2-digit', timeZoneName:'short' });
+
+  const meta = `
+    <div class="gmeta">
+      <span class="phase-badge">${g.phase || 'Group Stage'}</span>
+      ${g.group ? `<span class="dot3"></span><span>${g.group}</span>` : ''}
+      <span class="dot3"></span>
+      <span>${timeStr}</span>
+      ${g.venue ? `<span class="dot3"></span><span>${g.venue}</span>` : ''}
+    </div>`;
+
+  // ── Teams row ──
+  let teamsHtml;
+  if (done) {
+    teamsHtml = `
+      <div class="gteams">
+        <div class="team"><span class="team-flag">${g.homeFlag||'🏳️'}</span>
+          <div class="team-name">${g.homeTeam}</div></div>
+        <div class="final-score">
+          <div class="sc">${g.actualHome}<span class="sep"> – </span>${g.actualAway}</div>
+          <div class="lbl">Full Time</div>
+        </div>
+        <div class="team"><span class="team-flag">${g.awayFlag||'🏳️'}</span>
+          <div class="team-name">${g.awayTeam}</div></div>
+      </div>`;
+  } else if (locked) {
+    teamsHtml = `
+      <div class="gteams">
+        <div class="team"><span class="team-flag">${g.homeFlag||'🏳️'}</span>
+          <div class="team-name">${g.homeTeam}</div></div>
+        <div style="text-align:center;flex-shrink:0">
+          ${pred
+            ? `<div class="locked-score">${ph}<span class="sep"> – </span>${pa}</div>
+               <div style="font-size:11px;color:var(--muted);margin-top:3px">Your pick</div>`
+            : `<div style="font-size:15px;color:var(--muted)">No pick</div>`}
+        </div>
+        <div class="team"><span class="team-flag">${g.awayFlag||'🏳️'}</span>
+          <div class="team-name">${g.awayTeam}</div></div>
+      </div>`;
+  } else {
+    teamsHtml = `
+      <div class="gteams">
+        <div class="team"><span class="team-flag">${g.homeFlag||'🏳️'}</span>
+          <div class="team-name">${g.homeTeam}</div></div>
+        <div class="score-vs">
+          <div class="sctrl">
+            <button class="scbtn" onclick="adj('${g.id}','home',1)">+</button>
+            <div class="scnum" id="sh-${g.id}">${ph}</div>
+            <button class="scbtn" onclick="adj('${g.id}','home',-1)">−</button>
+          </div>
+          <div class="scsep">–</div>
+          <div class="sctrl">
+            <button class="scbtn" onclick="adj('${g.id}','away',1)">+</button>
+            <div class="scnum" id="sa-${g.id}">${pa}</div>
+            <button class="scbtn" onclick="adj('${g.id}','away',-1)">−</button>
+          </div>
+        </div>
+        <div class="team"><span class="team-flag">${g.awayFlag||'🏳️'}</span>
+          <div class="team-name">${g.awayTeam}</div></div>
+      </div>`;
+  }
+
+  // ── Footer row ──
+  let foot;
+  if (done) {
+    if (pred) {
+      const rt = pred.resultType;
+      const [cls, label] =
+        rt === 'exact'   ? ['res-exact',   `★ Exact Score · +${pred.points} pts`] :
+        rt === 'outcome' ? ['res-outcome',  `✓ Correct Result · +${pred.points} pt`] :
+        rt === 'wrong'   ? ['res-wrong',    `✗ Wrong · +0 pts`] :
+                           ['res-pending',  `Your pick: ${ph}–${pa} · Calculating…`];
+      foot = `
+        <div class="gfoot">
+          <div class="lock-info">🏁 Full time</div>
+          <span class="res-badge ${cls}">${label}</span>
+        </div>`;
+    } else {
+      foot = `
+        <div class="gfoot">
+          <div class="lock-info">🏁 Full time</div>
+          <span class="res-badge res-nopick">✗ No pick made · +0 pts</span>
+        </div>`;
+    }
+  } else if (locked) {
+    const minLeft = Math.max(0, Math.round((kick - now) / 60000));
+    foot = `
+      <div class="gfoot">
+        <div class="lock-info amber">🔒 Locked · Starts in ${minLeft > 0 ? minLeft + ' min' : 'progress'}</div>
+        ${!pred ? '<span class="res-badge res-nopick">⚠️ No prediction made</span>' : ''}
+      </div>`;
+  } else {
+    const msLeft = lock - now;
+    const hLeft  = Math.floor(msLeft / 3600000);
+    const mLeft  = Math.floor((msLeft % 3600000) / 60000);
+    const lockIn = hLeft > 0 ? `${hLeft}h ${mLeft}m` : `${mLeft} min`;
+    foot = `
+      <div class="gfoot">
+        <div class="lock-info">🔓 Locks in ${lockIn}</div>
+        <button class="btn btn-green btn-sm" onclick="savePick('${g.id}')">
+          ${pred ? '✏️ Update Pick' : '🎯 Save Pick'}
+        </button>
+      </div>`;
+  }
+
+  const cls = done ? 'gcard finished' : locked ? 'gcard locked' : 'gcard';
+  return `<div class="${cls}">${meta}${teamsHtml}${foot}</div>`;
+}
+
+/* ════════════════════════════════════════
+   SCORE INPUT
+════════════════════════════════════════ */
+function adj(gid, side, d) {
+  if (!scores[gid]) scores[gid] = { home: 0, away: 0 };
+  scores[gid][side] = Math.max(0, (scores[gid][side] || 0) + d);
+  const el2 = document.getElementById(`s${side[0]}-${gid}`);
+  if (el2) el2.textContent = scores[gid][side];
+}
+
+async function savePick(gid) {
+  if (!scores[gid]) {
+    const hEl = document.getElementById(`sh-${gid}`);
+    const aEl = document.getElementById(`sa-${gid}`);
+    scores[gid] = { home: parseInt(hEl?.textContent||0), away: parseInt(aEl?.textContent||0) };
+  }
+  const { home, away } = scores[gid];
+  const existing = myPreds[gid];
+
+  try {
+    if (existing) {
+      await db.collection('predictions').doc(existing.id).update({
+        predHome: home, predAway: away,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    } else {
+      await db.collection('predictions').add({
+        userId: me.uid, gameId: gid,
+        predHome: home, predAway: away,
+        points: null, resultType: null,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    toast(`Pick saved: ${home} – ${away}`, 'ok');
+    await refreshMyPreds();
+    renderGames();
+  } catch (e) {
+    toast('Error saving pick', 'err');
+    console.error(e);
+  }
+}
+
+/* ════════════════════════════════════════
+   LEADERBOARD
+════════════════════════════════════════ */
+function renderBoard(users) {
+  const body = el('lb-body');
+  if (!users.length) {
+    body.innerHTML = `<div class="empty"><span class="icon">🏆</span><p>No players yet.</p></div>`;
+    return;
+  }
+  const medals = ['🥇','🥈','🥉'];
+  const mcls   = ['g','s','b'];
+  body.innerHTML = users.map((u, i) => {
+    const isMe = u.id === me.uid;
+    const rank = i < 3
+      ? `<span class="${mcls[i]}">${medals[i]}</span>`
+      : `<span>${i+1}</span>`;
+    return `
+      <div class="lb-row${isMe?' me':''}">
+        <div class="lb-rank">${rank}</div>
+        <div class="lb-name">${u.name}${isMe?'<span class="you-tag">YOU</span>':''}</div>
+        <div class="lb-cell pts">${u.totalPoints||0}</div>
+        <div class="lb-cell ex">⭐ ${u.exactScores||0}</div>
+        <div class="lb-cell ot">✓ ${u.correctOutcomes||0}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ════════════════════════════════════════
+   UI HELPERS
+════════════════════════════════════════ */
+function showView(name) {
+  ['setup','login','app'].forEach(n => {
+    const d = el('v-'+n);
+    if (d) { d.style.display='none'; d.classList.remove('active'); }
+  });
+  const target = el('v-'+name);
+  if (target) { target.style.display='flex'; target.classList.add('active'); }
+}
+
+function showPane(name) {
+  ['picks','board'].forEach(n => {
+    el('pane-'+n).classList.toggle('on', n===name);
+    el('nt-'+n).classList.toggle('on', n===name);
+  });
+}
+
+function switchTab(t) {
+  el('f-login').style.display = t==='login'?'block':'none';
+  el('f-reg').style.display   = t==='reg'  ?'block':'none';
+  el('t-login').classList.toggle('on', t==='login');
+  el('t-reg').classList.toggle('on',   t==='reg');
+}
+
+function showLoginInstead() {
+  el('msg-pending').style.display = 'none';
+  document.querySelector('.tabs').style.display = 'grid';
+  switchTab('login');
+}
+
+let toastT;
+function toast(msg, type='ok') {
+  const t = el('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function fmtDateHdr(date) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tom   = new Date(today); tom.setDate(today.getDate()+1);
+  const d     = new Date(date);  d.setHours(0,0,0,0);
+  if (+d===+today) return '📅 Today';
+  if (+d===+tom)   return '📅 Tomorrow';
+  return date.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+}
+
+function authErr(code) {
+  return {
+    'auth/user-not-found':    'No account found with this email.',
+    'auth/wrong-password':    'Incorrect password.',
+    'auth/invalid-credential':'Invalid email or password.',
+    'auth/email-already-in-use':'This email is already registered.',
+    'auth/weak-password':     'Password must be at least 6 characters.',
+    'auth/invalid-email':     'Please enter a valid email address.',
+    'auth/too-many-requests': 'Too many attempts — try again later.'
+  }[code] || 'Something went wrong. Please try again.';
+}
+
+function el(id) { return document.getElementById(id); }
+function v(id)  { return (el(id)?.value||'').trim(); }
+</script>
+</body>
+</html>
