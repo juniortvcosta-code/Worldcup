@@ -623,19 +623,9 @@ async function doRegister() {
   btn.disabled = true; btn.innerHTML = '<div class="spin"></div>';
   el('r-err').textContent = '';
   isRegistering = true;
-  let cred = null;
   try {
-    cred = await firebase.auth().createUserWithEmailAndPassword(email, pass);
+    const cred = await firebase.auth().createUserWithEmailAndPassword(email, pass);
     await cred.user.updateProfile({ displayName: name });
-
-    // Check for duplicate display name (query allowed now that user is authenticated)
-    const nameSnap = await db.collection('users').where('name', '==', name).limit(1).get();
-    if (!nameSnap.empty) {
-      await cred.user.delete();
-      cred = null;
-      throw { code: 'name-taken' };
-    }
-
     await db.collection('users').doc(cred.user.uid).set({
       name, email,
       isAdmin: false, approved: false,
@@ -650,11 +640,7 @@ async function doRegister() {
     el('msg-pending').style.display = 'block';
   } catch (e) {
     isRegistering = false;
-    if (e.code === 'name-taken') {
-      el('r-err').textContent = 'That name is already taken — please choose a different one.';
-    } else {
-      el('r-err').textContent = authErr(e.code);
-    }
+    el('r-err').textContent = authErr(e.code);
     btn.disabled = false; btn.textContent = 'Create Account';
   }
 }
