@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firestore.googleapis.com https://firebaseappcheck.googleapis.com; img-src 'self' data:; frame-src https://www.google.com https://www.recaptcha.net; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self';">
   <title>⚽ World Cup 2026 Predictor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -999,7 +998,6 @@ let games = {};     // gameId → game
 let myPreds = {};   // gameId → prediction doc {id, predHome, predAway, points, resultType}
 let scores = {};    // gameId → { home, away }  (live input state)
 let unsubGames, unsubBoard, unsubAllPreds;
-let allPredUnsubs = [];
 let isRegistering = false; // blocks onAuthStateChanged during signup
 let showPending = false;   // triggers pending message on next signout
 let activeGameDate = null; // currently selected date tab (YYYY-MM-DD local)
@@ -1086,27 +1084,25 @@ async function doLogin() {
 async function doRegister() {
   const name = v('r-name'), email = v('r-email'), pass = v('r-pass');
   if (!name || !email || !pass) { el('r-err').textContent = 'All fields required.'; return; }
-  const normalizedName = normalizeName(name);
-  if (!normalizedName) { el('r-err').textContent = 'Please choose a valid display name.'; return; }
   const btn = el('r-btn');
   btn.disabled = true; btn.innerHTML = '<div class="spin"></div>';
   el('r-err').textContent = '';
   isRegistering = true;
   let cred = null;
-  let reservedName = false;
   try {
     cred = await firebase.auth().createUserWithEmailAndPassword(email, pass);
     await cred.user.updateProfile({ displayName: name });
 
-    await db.collection('usernames').doc(normalizedName).set({
-      uid: cred.user.uid,
-      name,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    reservedName = true;
+    // Check for duplicate display name (query allowed now that user is authenticated)
+    const nameSnap = await db.collection('users').where('name', '==', name).limit(1).get();
+    if (!nameSnap.empty) {
+      await cred.user.delete();
+      cred = null;
+      throw { code: 'name-taken' };
+    }
 
     await db.collection('users').doc(cred.user.uid).set({
-      name, normalizedName, email,
+      name, email,
       isAdmin: false, approved: false,
       totalPoints: 0, exactScores: 0, correctOutcomes: 0,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1119,14 +1115,19 @@ async function doRegister() {
     el('msg-pending').style.display = 'block';
   } catch (e) {
     isRegistering = false;
-    if (reservedName && cred?.user) {
-      await db.collection('usernames').doc(normalizedName).delete().catch(() => {});
+    // Always clean up the auth account on any failure so the email isn't
+    // left orphaned in Firebase Auth (which would cause EMAIL_EXISTS on retry).
+    // For 'name-taken' cred is already null (we deleted it before throwing).
+    if (cred) {
+      try { await cred.user.delete(); } catch (_) {
+        try { await firebase.auth().signOut(); } catch (__) {}
+      }
+      cred = null;
     }
-    if (cred?.user) {
-      await cred.user.delete().catch(() => {});
-    }
-    if (e.code === 'already-exists' || e.code === 'permission-denied') {
+    if (e.code === 'name-taken') {
       el('r-err').textContent = 'That name is already taken — please choose a different one.';
+    } else if (e.code === 'permission-denied') {
+      el('r-err').textContent = 'Registration check failed. Please try again or contact the admin.';
     } else {
       el('r-err').textContent = authErr(e.code);
     }
@@ -1150,16 +1151,12 @@ function startListeners() {
     snap.forEach(d => { games[d.id] = { id: d.id, ...d.data() }; });
     await refreshMyPreds();
     renderGames();
-    startAllPickListeners();
     renderAllPicks();
   });
 
   // Leaderboard + player profiles listener
-  const usersQuery = myProfile?.isAdmin
-    ? db.collection('users')
-    : db.collection('users').where('approved', '==', true);
-
-  unsubBoard = usersQuery
+  unsubBoard = db.collection('users')
+    .orderBy('totalPoints', 'desc')
     .onSnapshot(snap => {
       playerProfiles = {};
       const users = [];
@@ -1170,34 +1167,30 @@ function startListeners() {
       renderBoard(users);
       renderAllPicks();
     });
+
+  // All predictions listener (for All Picks tab)
+  unsubAllPreds = db.collection('predictions').onSnapshot(snap => {
+    allGamePreds = {};
+    snap.forEach(d => {
+      const p = d.data();
+      if (!allGamePreds[p.gameId]) allGamePreds[p.gameId] = {};
+      allGamePreds[p.gameId][p.userId] = { predHome: p.predHome, predAway: p.predAway };
+    });
+    renderAllPicks();
+  });
 }
 
 function stopListeners() {
   if (unsubGames)    { unsubGames();    unsubGames = null; }
   if (unsubBoard)    { unsubBoard();    unsubBoard = null; }
   if (unsubAllPreds) { unsubAllPreds(); unsubAllPreds = null; }
-  stopAllPickListeners();
-}
-
-function stopAllPickListeners() {
-  allPredUnsubs.forEach(unsub => unsub());
-  allPredUnsubs = [];
-  allGamePreds = {};
 }
 
 async function refreshMyPreds() {
   const snap = await db.collection('predictions')
     .where('userId', '==', me.uid).get();
   myPreds = {};
-  snap.forEach(d => {
-    const p = d.data();
-    myPreds[p.gameId] = {
-      id: d.id,
-      ...p,
-      predHome: safeScore(p.predHome),
-      predAway: safeScore(p.predAway)
-    };
-  });
+  snap.forEach(d => { myPreds[d.data().gameId] = { id: d.id, ...d.data() }; });
 }
 
 /* ════════════════════════════════════════
@@ -1271,33 +1264,6 @@ function renderGames() {
   </div>`;
 }
 
-function startAllPickListeners() {
-  stopAllPickListeners();
-
-  const lockedGames = Object.values(games)
-    .filter(g => {
-      const kick = g.kickoff.toDate().getTime();
-      return Date.now() >= kick - LOCK_MINUTES * 60 * 1000 && g.status !== 'finished';
-    });
-
-  lockedGames.forEach(g => {
-    const unsub = db.collection('predictions')
-      .where('gameId', '==', g.id)
-      .onSnapshot(snap => {
-        allGamePreds[g.id] = {};
-        snap.forEach(d => {
-          const p = d.data();
-          allGamePreds[g.id][p.userId] = {
-            predHome: Number(p.predHome),
-            predAway: Number(p.predAway)
-          };
-        });
-        renderAllPicks();
-      });
-    allPredUnsubs.push(unsub);
-  });
-}
-
 function selectGameDate(key) {
   activeGameDate = key;
   renderGames();
@@ -1331,7 +1297,7 @@ function gameCard(g) {
       <span class="phase-badge">${esc(g.phase || 'Group Stage')}</span>
       ${g.group ? `<span class="dot3"></span><span>${esc(g.group)}</span>` : ''}
       <span class="dot3"></span>
-      <span>${timeStr}</span>
+      <span>${esc(timeStr)}</span>
       ${g.venue ? `<span class="dot3"></span><span>${esc(g.venue)}</span>` : ''}
     </div>`;
 
@@ -1343,7 +1309,7 @@ function gameCard(g) {
         <div class="team"><span class="team-flag">${g.homeFlag||'🏳️'}</span>
           <div class="team-name">${esc(g.homeTeam)}</div></div>
         <div class="final-score">
-          <div class="sc">${g.actualHome}<span class="sep"> – </span>${g.actualAway}</div>
+          <div class="sc">${esc(g.actualHome)}<span class="sep"> – </span>${esc(g.actualAway)}</div>
           <div class="lbl">Full Time</div>
         </div>
         <div class="team"><span class="team-flag">${g.awayFlag||'🏳️'}</span>
@@ -1356,7 +1322,7 @@ function gameCard(g) {
           <div class="team-name">${esc(g.homeTeam)}</div></div>
         <div style="text-align:center;flex-shrink:0">
           ${pred
-            ? `<div class="locked-score">${pred.predHome}<span class="sep"> – </span>${pred.predAway}</div>
+            ? `<div class="locked-score">${esc(pred.predHome)}<span class="sep"> – </span>${esc(pred.predAway)}</div>
                <div style="font-size:11px;color:var(--muted);margin-top:3px">Your pick</div>`
             : `<div style="font-size:15px;color:var(--muted)">No pick</div>`}
         </div>
@@ -1392,10 +1358,10 @@ function gameCard(g) {
     if (pred) {
       const rt = pred.resultType;
       const [cls, label] =
-        rt === 'exact'   ? ['res-exact',   `★ Exact Score · +${pred.points} pts`] :
-        rt === 'outcome' ? ['res-outcome',  `✓ Correct Result · +${pred.points} pt`] :
+        rt === 'exact'   ? ['res-exact',   `★ Exact Score · +${esc(pred.points)} pts`] :
+        rt === 'outcome' ? ['res-outcome',  `✓ Correct Result · +${esc(pred.points)} pt`] :
         rt === 'wrong'   ? ['res-wrong',    `✗ Wrong · +0 pts`] :
-                           ['res-pending',  `Your pick: ${pred.predHome}–${pred.predAway} · Calculating…`];
+                           ['res-pending',  `Your pick: ${esc(pred.predHome)}–${esc(pred.predAway)} · Calculating…`];
       foot = `
         <div class="gfoot">
           <div class="lock-info">🏁 Full time</div>
@@ -1438,7 +1404,7 @@ function gameCard(g) {
 ════════════════════════════════════════ */
 function adj(gid, side, d) {
   if (!scores[gid]) scores[gid] = { home: 0, away: 0 };
-  scores[gid][side] = Math.max(0, Math.min(20, (scores[gid][side] || 0) + d));
+  scores[gid][side] = Math.max(0, (scores[gid][side] || 0) + d);
   const el2 = document.getElementById(`s${side[0]}-${gid}`);
   if (el2) el2.textContent = scores[gid][side];
 }
@@ -1462,8 +1428,13 @@ async function savePick(gid) {
     const aEl = document.getElementById(`sa-${gid}`);
     scores[gid] = { home: parseInt(hEl?.textContent||0), away: parseInt(aEl?.textContent||0) };
   }
+  // Clamp scores to a sane integer range (server rules also enforce 0..20)
   const home = Math.max(0, Math.min(20, parseInt(scores[gid].home, 10) || 0));
   const away = Math.max(0, Math.min(20, parseInt(scores[gid].away, 10) || 0));
+
+  // Deterministic prediction ID: one document per user per game.
+  // This prevents duplicate prediction docs that would inflate scores
+  // (and matches the predId == uid + '_' + gameId rule).
   const predId = `${me.uid}_${gid}`;
 
   try {
@@ -1474,15 +1445,21 @@ async function savePick(gid) {
       predAway: away,
       points: null,
       resultType: null,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     toast(`Pick saved: ${home} – ${away}`, 'ok');
     await refreshMyPreds();
     renderGames();
   } catch (e) {
-    toast('Error saving pick', 'err');
-    console.error(e);
+    let msg = 'Error saving pick.';
+    if (e.code === 'permission-denied') {
+      msg = '⛔ Save denied — picks may be locked, or your account is not approved.';
+    } else if (e.code === 'unavailable') {
+      msg = 'Network error — check your connection and try again.';
+    }
+    toast(msg, 'err');
+    console.error('savePick error:', e.code, e.message, e);
   }
 }
 
@@ -1534,7 +1511,7 @@ function renderAllPicks() {
             ${esc(profile.name || profile.email)}${isMe ? ' <span class="you-tag">YOU</span>' : ''}
           </span>
           <span style="font-size:15px;font-weight:700;color:${p ? 'white' : 'var(--muted)'}">
-            ${p ? `${p.predHome} – ${p.predAway}` : '—'}
+            ${p ? `${esc(p.predHome)} – ${esc(p.predAway)}` : '—'}
           </span>
         </div>`;
     }).join('');
@@ -1542,10 +1519,10 @@ function renderAllPicks() {
     return `
       <div class="gcard" style="margin-bottom:16px">
         <div class="gmeta">
-          <span class="phase-badge">${esc(g.phase || 'Group Stage')}</span>
-          ${g.group ? `<span class="dot3"></span><span>${esc(g.group)}</span>` : ''}
+          <span class="phase-badge">${g.phase || 'Group Stage'}</span>
+          ${g.group ? `<span class="dot3"></span><span>${g.group}</span>` : ''}
           <span class="dot3"></span><span>${timeStr}</span>
-          ${g.venue ? `<span class="dot3"></span><span>${esc(g.venue)}</span>` : ''}
+          ${g.venue ? `<span class="dot3"></span><span>${g.venue}</span>` : ''}
           <span class="dot3"></span>
           <span style="color:var(--muted)">${picksCount}/${players.length} picks submitted</span>
         </div>
@@ -1572,13 +1549,6 @@ function renderAllPicks() {
 ════════════════════════════════════════ */
 function renderBoard(users) {
   const body = el('lb-body');
-  users = users
-    .filter(u => u.approved || u.isAdmin)
-    .sort((a, b) =>
-      Number(b.totalPoints || 0) - Number(a.totalPoints || 0) ||
-      Number(b.exactScores || 0) - Number(a.exactScores || 0) ||
-      Number(b.correctOutcomes || 0) - Number(a.correctOutcomes || 0) ||
-      String(a.name || a.email || '').localeCompare(String(b.name || b.email || '')));
   if (!users.length) {
     body.innerHTML = `<div class="empty"><span class="icon">🏆</span><p>No players yet.</p></div>`;
     return;
@@ -1666,8 +1636,6 @@ function authErr(code) {
 function el(id) { return document.getElementById(id); }
 function v(id)  { return (el(id)?.value||'').trim(); }
 function esc(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function normalizeName(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase().replace(/[^a-z0-9 _.-]/g, '').slice(0, 40); }
-function safeScore(n) { n = Number(n); return Number.isInteger(n) && n >= 0 && n <= 20 ? n : 0; }
 </script>
 </body>
 </html>
