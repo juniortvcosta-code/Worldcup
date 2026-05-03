@@ -233,6 +233,46 @@
     .final-score .sc .sep { color:var(--muted); }
     .final-score .lbl { font-size:11px; color:var(--muted); margin-top:2px; }
 
+    /* finished card: pick vs final side-by-side panel */
+    .score-pair {
+      display:flex; align-items:stretch; gap:0;
+      flex-shrink:0;
+      background:var(--card); border:1px solid var(--border);
+      border-radius:10px; overflow:hidden;
+      min-width:180px;
+    }
+    .score-cell {
+      flex:1; text-align:center; padding:8px 14px;
+      display:flex; flex-direction:column; justify-content:center; gap:2px;
+    }
+    .score-cell.divider { border-right:1px solid var(--border); }
+    .score-cell .num {
+      font-size:20px; font-weight:800; color:white;
+      letter-spacing:-0.5px; line-height:1;
+    }
+    .score-cell .num .sep { color:var(--muted); margin:0 2px; }
+    .score-cell .lbl {
+      font-size:9.5px; font-weight:700; text-transform:uppercase;
+      letter-spacing:.6px; color:var(--muted); line-height:1; margin-top:2px;
+    }
+    /* tint the pick cell with the outcome color */
+    .score-cell.pick-exact   { background:rgba(255,215,0,.10); }
+    .score-cell.pick-exact   .num,
+    .score-cell.pick-exact   .lbl { color:var(--gold); }
+    .score-cell.pick-outcome { background:rgba(0,166,81,.10); }
+    .score-cell.pick-outcome .num,
+    .score-cell.pick-outcome .lbl { color:var(--green-l); }
+    .score-cell.pick-wrong   { background:rgba(239,68,68,.08); }
+    .score-cell.pick-wrong   .num,
+    .score-cell.pick-wrong   .lbl { color:var(--red); }
+    .score-cell.pick-nopick  .num { color:var(--muted); font-size:13px; }
+    .score-cell.pick-nopick  .lbl { color:var(--muted); }
+    @media (max-width:480px) {
+      .score-pair { min-width:150px; }
+      .score-cell { padding:6px 10px; }
+      .score-cell .num { font-size:17px; }
+    }
+
     /* ── LEADERBOARD ────────────────────────────────── */
     .lboard {
       background:var(--surface); border:1px solid var(--border);
@@ -968,8 +1008,8 @@
           <div style="text-align:center">#</div>
           <div>Player</div>
           <div style="text-align:center">Pts</div>
-          <div style="text-align:center">Exact Score</div>
-          <div style="text-align:center">Correct Winner</div>
+          <div style="text-align:center">Exact</div>
+          <div style="text-align:center">Result</div>
         </div>
         <div id="lb-body">
           <div class="empty"><div class="spin"></div></div>
@@ -1304,13 +1344,34 @@ function gameCard(g) {
   // ── Teams row ──
   let teamsHtml;
   if (done) {
+    // Pick cell on the LEFT, final score on the RIGHT.
+    // Pick cell tinted by outcome (gold/green/red/grey).
+    // SECURITY: pickClass is chosen from a closed list of literals — never
+    // interpolated from Firestore — so a malicious resultType value cannot
+    // inject extra HTML/CSS. predHome/predAway are still escaped with esc().
+    let pickClass = 'pick-nopick';
+    if (pred) {
+      if      (pred.resultType === 'exact')   pickClass = 'pick-exact';
+      else if (pred.resultType === 'outcome') pickClass = 'pick-outcome';
+      else if (pred.resultType === 'wrong')   pickClass = 'pick-wrong';
+      else                                    pickClass = 'pick-nopick'; // pending
+    }
+    const pickInner = pred
+      ? `<div class="num">${esc(pred.predHome)}<span class="sep">–</span>${esc(pred.predAway)}</div>
+         <div class="lbl">Your Pick</div>`
+      : `<div class="num">—</div>
+         <div class="lbl">No Pick</div>`;
+
     teamsHtml = `
       <div class="gteams">
         <div class="team"><span class="team-flag">${g.homeFlag||'🏳️'}</span>
           <div class="team-name">${esc(g.homeTeam)}</div></div>
-        <div class="final-score">
-          <div class="sc">${esc(g.actualHome)}<span class="sep"> – </span>${esc(g.actualAway)}</div>
-          <div class="lbl">Full Time</div>
+        <div class="score-pair">
+          <div class="score-cell ${pickClass} divider">${pickInner}</div>
+          <div class="score-cell">
+            <div class="num">${esc(g.actualHome)}<span class="sep">–</span>${esc(g.actualAway)}</div>
+            <div class="lbl">Full Time</div>
+          </div>
         </div>
         <div class="team"><span class="team-flag">${g.awayFlag||'🏳️'}</span>
           <div class="team-name">${esc(g.awayTeam)}</div></div>
@@ -1359,7 +1420,7 @@ function gameCard(g) {
       const rt = pred.resultType;
       const [cls, label] =
         rt === 'exact'   ? ['res-exact',   `★ Exact Score · +${esc(pred.points)} pts`] :
-        rt === 'outcome' ? ['res-outcome',  `✓ Correct Winner · +${esc(pred.points)} pt`] :
+        rt === 'outcome' ? ['res-outcome',  `✓ Correct Result · +${esc(pred.points)} pt`] :
         rt === 'wrong'   ? ['res-wrong',    `✗ Wrong · +0 pts`] :
                            ['res-pending',  `Your pick: ${esc(pred.predHome)}–${esc(pred.predAway)} · Calculating…`];
       foot = `
