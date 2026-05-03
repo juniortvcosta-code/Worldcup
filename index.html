@@ -351,8 +351,9 @@
 
     /* ── RESPONSIVE ─────────────────────────────────── */
     @media (max-width:600px) {
-      .lb-hdr, .lb-row { grid-template-columns:44px 1fr 60px 60px; }
-      .lb-hdr>:last-child, .lb-row>:last-child { display:none; }
+      /* Show all 5 standings columns on portrait mobile by shrinking each
+         numeric column and trimming side padding (was hiding "Correct Winner") */
+      .lb-hdr, .lb-row { grid-template-columns:36px 1fr 50px 50px 50px; padding:11px 12px; }
       .ntab span { display:none; }
       .auth-card { padding:28px 20px; }
       .scnum { font-size:24px; width:34px; }
@@ -904,7 +905,7 @@
       <!-- Register form -->
       <div id="f-reg" style="display:none">
         <div class="fg"><label>Your Name</label>
-          <input type="text" id="r-name" placeholder="e.g. Diego Rayas" /></div>
+          <input type="text" id="r-name" placeholder="e.g. Luis Diaz" /></div>
         <div class="fg"><label>Email</label>
           <input type="email" id="r-email" placeholder="you@example.com" /></div>
         <div class="fg"><label>Password</label>
@@ -1420,7 +1421,7 @@ function gameCard(g) {
       const rt = pred.resultType;
       const [cls, label] =
         rt === 'exact'   ? ['res-exact',   `★ Exact Score · +${esc(pred.points)} pts`] :
-        rt === 'outcome' ? ['res-outcome',  `✓ Correct Winner · +${esc(pred.points)} pt`] :
+        rt === 'outcome' ? ['res-outcome',  `✓ Correct Result · +${esc(pred.points)} pt`] :
         rt === 'wrong'   ? ['res-wrong',    `✗ Wrong · +0 pts`] :
                            ['res-pending',  `Your pick: ${esc(pred.predHome)}–${esc(pred.predAway)} · Calculating…`];
       foot = `
