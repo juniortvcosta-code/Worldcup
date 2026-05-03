@@ -1008,8 +1008,8 @@
           <div style="text-align:center">#</div>
           <div>Player</div>
           <div style="text-align:center">Pts</div>
-          <div style="text-align:center">Exact</div>
-          <div style="text-align:center">Result</div>
+          <div style="text-align:center">Exact Score</div>
+          <div style="text-align:center">Correct Winner</div>
         </div>
         <div id="lb-body">
           <div class="empty"><div class="spin"></div></div>
@@ -1420,7 +1420,7 @@ function gameCard(g) {
       const rt = pred.resultType;
       const [cls, label] =
         rt === 'exact'   ? ['res-exact',   `★ Exact Score · +${esc(pred.points)} pts`] :
-        rt === 'outcome' ? ['res-outcome',  `✓ Correct Result · +${esc(pred.points)} pt`] :
+        rt === 'outcome' ? ['res-outcome',  `✓ Correct Winner · +${esc(pred.points)} pt`] :
         rt === 'wrong'   ? ['res-wrong',    `✗ Wrong · +0 pts`] :
                            ['res-pending',  `Your pick: ${esc(pred.predHome)}–${esc(pred.predAway)} · Calculating…`];
       foot = `
