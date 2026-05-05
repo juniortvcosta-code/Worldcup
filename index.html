@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Content Security Policy: blocks loading scripts/frames/etc. from anywhere
+       except Google's Firebase + reCAPTCHA hosts. 'unsafe-inline' is still
+       required because the codebase uses inline <script> blocks and inline
+       onclick handlers; rules-level integer/enum validation makes XSS via
+       prediction data effectively impossible regardless. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://www.gstatic.com https://*.googleapis.com https://*.firebaseio.com https://*.firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseappcheck.googleapis.com; frame-src https://www.google.com https://www.recaptcha.net; img-src 'self' data:; base-uri 'self'; object-src 'none';" />
   <title>⚽ World Cup 2026 Predictor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -747,7 +753,7 @@
           <h4>Step 3 — Create Firestore Database</h4>
           <ol>
             <li>Firestore Database → Create database</li>
-            <li>Start in <strong>Test mode</strong> → pick region → Done</li>
+            <li>Start in <strong>Production mode</strong> → pick region → Done. Then publish <code>firestore.rules</code> from this folder before inviting users.</li>
           </ol>
         </div>
         <div class="step">
@@ -1038,12 +1044,15 @@ let me = null, myProfile = null;
 let games = {};     // gameId → game
 let myPreds = {};   // gameId → prediction doc {id, predHome, predAway, points, resultType}
 let scores = {};    // gameId → { home, away }  (live input state)
-let unsubGames, unsubBoard, unsubAllPreds;
+let unsubGames, unsubBoard, unsubMyPreds;
+let lockTickInterval = null; // 30s tick to keep lock state + locked-listener fresh
+let lockedPredUnsubs = {}; // gameId → unsubscribe fn for that game's locked picks listener
 let isRegistering = false; // blocks onAuthStateChanged during signup
+let showRejected = false;  // triggers rejected message on next signout
 let showPending = false;   // triggers pending message on next signout
 let activeGameDate = null; // currently selected date tab (YYYY-MM-DD local)
-let allGamePreds = {};  // gameId → { userId → { predHome, predAway } }
-let playerProfiles = {}; // userId → user data (for All Picks names)
+let allGamePreds = {};  // gameId → { userId → { predHome, predAway } }   (LOCKED games only)
+let playerProfiles = {}; // userId → publicProfile (for leaderboard + All Picks names)
 
 // ─── CHANGE THIS to adjust how many minutes before kickoff picks are locked ───
 const LOCK_MINUTES = 5;
@@ -1083,6 +1092,12 @@ function isConfigured() {
       const snap = await ref.get();
       if (!snap.exists) { await firebase.auth().signOut(); return; }
       myProfile = snap.data();
+      // Rejected accounts are blocked at the auth gate AND by Firestore rules.
+      if (myProfile.rejected === true) {
+        showRejected = true;
+        await firebase.auth().signOut();
+        return;
+      }
       if (!myProfile.approved && !myProfile.isAdmin) {
         showPending = true;
         await firebase.auth().signOut();
@@ -1096,7 +1111,10 @@ function isConfigured() {
       me = null; myProfile = null;
       stopListeners();
       showView('login');
-      if (showPending) {
+      if (showRejected) {
+        el('l-err').textContent = 'This account is no longer active. Please contact the admin.';
+        showRejected = false;
+      } else if (showPending) {
         el('msg-pending').style.display = 'block';
         showPending = false;
       }
@@ -1123,8 +1141,19 @@ async function doLogin() {
 }
 
 async function doRegister() {
-  const name = v('r-name'), email = v('r-email'), pass = v('r-pass');
-  if (!name || !email || !pass) { el('r-err').textContent = 'All fields required.'; return; }
+  const rawName = v('r-name'), email = v('r-email'), pass = v('r-pass');
+  if (!rawName || !email || !pass) { el('r-err').textContent = 'All fields required.'; return; }
+  const name = cleanDisplayName(rawName);
+  if (name.length < 2 || name.length > 40) {
+    el('r-err').textContent = 'Display name must be 2 to 40 characters.';
+    return;
+  }
+  const nameKey = normalizeNameKey(name);
+  if (!nameKey) {
+    el('r-err').textContent = 'Use at least 3 letters or numbers in your display name.';
+    return;
+  }
+
   const btn = el('r-btn');
   btn.disabled = true; btn.innerHTML = '<div class="spin"></div>';
   el('r-err').textContent = '';
@@ -1134,23 +1163,27 @@ async function doRegister() {
     cred = await firebase.auth().createUserWithEmailAndPassword(email, pass);
     await cred.user.updateProfile({ displayName: name });
 
-    // Check for duplicate display name (query allowed now that user is authenticated)
-    const nameSnap = await db.collection('users').where('name', '==', name).limit(1).get();
-    if (!nameSnap.empty) {
-      await cred.user.delete();
-      cred = null;
-      throw { code: 'name-taken' };
-    }
-
-    await db.collection('users').doc(cred.user.uid).set({
-      name, email,
-      isAdmin: false, approved: false,
-      totalPoints: 0, exactScores: 0, correctOutcomes: 0,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    // Atomic batch: create the username reservation AND the private user doc
+    // in a single commit. The user-doc CREATE rule uses getAfter() to verify
+    // both docs cross-reference each other, so race conditions are impossible.
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    const batch = db.batch();
+    batch.set(db.collection('usernames').doc(nameKey), {
+      uid: cred.user.uid,
+      name,
+      createdAt: now
     });
+    batch.set(db.collection('users').doc(cred.user.uid), {
+      name, nameKey, email,
+      isAdmin: false, approved: false, rejected: false,
+      totalPoints: 0, exactScores: 0, correctOutcomes: 0,
+      createdAt: now,
+      updatedAt: now
+    });
+    await batch.commit();
+
     await firebase.auth().signOut();
     isRegistering = false;
-    // Show pending notice, hide forms
     el('auth-tabs').style.display = 'none';
     el('f-reg').style.display = 'none';
     el('msg-pending').style.display = 'block';
@@ -1158,22 +1191,37 @@ async function doRegister() {
     isRegistering = false;
     // Always clean up the auth account on any failure so the email isn't
     // left orphaned in Firebase Auth (which would cause EMAIL_EXISTS on retry).
-    // For 'name-taken' cred is already null (we deleted it before throwing).
     if (cred) {
       try { await cred.user.delete(); } catch (_) {
         try { await firebase.auth().signOut(); } catch (__) {}
       }
       cred = null;
     }
-    if (e.code === 'name-taken') {
-      el('r-err').textContent = 'That name is already taken — please choose a different one.';
-    } else if (e.code === 'permission-denied') {
-      el('r-err').textContent = 'Registration check failed. Please try again or contact the admin.';
+    if (e.code === 'permission-denied') {
+      // The most likely cause is a name-already-taken collision, since the
+      // username reservation create requires non-existence (Firestore semantics).
+      el('r-err').textContent = 'That display name is already taken — please choose a different one.';
     } else {
       el('r-err').textContent = authErr(e.code);
     }
     btn.disabled = false; btn.textContent = 'Create Account';
   }
+}
+
+// ── DISPLAY-NAME HELPERS ───────────────────────────────────────────────────
+// Used by registration and by the admin migration tool.
+function cleanDisplayName(name) {
+  return String(name || '').replace(/\s+/g, ' ').trim();
+}
+function normalizeNameKey(name) {
+  // lowercase, keep alnum, collapse separators to single hyphen, strip edges
+  const key = cleanDisplayName(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+  // Must match server-side validNameKey regex: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+  return /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(key) ? key : '';
 }
 
 function doSignOut() {
@@ -1186,18 +1234,23 @@ function doSignOut() {
 function startListeners() {
   el('picks-subtitle').textContent =
     `Pick scores for every match. Changes lock ${LOCK_MINUTES} min before kickoff.`;
-  // Games listener
-  unsubGames = db.collection('games').orderBy('kickoff').onSnapshot(async snap => {
+
+  // Games listener (capped to 200 to bound transfer cost)
+  unsubGames = db.collection('games').orderBy('kickoff').limit(200).onSnapshot(snap => {
     games = {};
     snap.forEach(d => { games[d.id] = { id: d.id, ...d.data() }; });
-    await refreshMyPreds();
     renderGames();
+    syncLockedPredictionListeners();
     renderAllPicks();
   });
 
-  // Leaderboard + player profiles listener
-  unsubBoard = db.collection('users')
+  // Leaderboard listener — reads /publicProfiles, NOT /users.
+  // publicProfiles only carries display name + stat totals — no email,
+  // no admin flag, no approval state — so this is safe to expose to all
+  // approved players. Capped at 250.
+  unsubBoard = db.collection('publicProfiles')
     .orderBy('totalPoints', 'desc')
+    .limit(250)
     .onSnapshot(snap => {
       playerProfiles = {};
       const users = [];
@@ -1209,29 +1262,97 @@ function startListeners() {
       renderAllPicks();
     });
 
-  // All predictions listener (for All Picks tab)
-  unsubAllPreds = db.collection('predictions').onSnapshot(snap => {
-    allGamePreds = {};
-    snap.forEach(d => {
-      const p = d.data();
-      if (!allGamePreds[p.gameId]) allGamePreds[p.gameId] = {};
-      allGamePreds[p.gameId][p.userId] = { predHome: p.predHome, predAway: p.predAway };
+  // OWN predictions only. Cheap, scoped, and matches the rule that lets
+  // a player read predictions where userId == their UID at any time.
+  unsubMyPreds = db.collection('predictions')
+    .where('userId', '==', me.uid)
+    .onSnapshot(snap => {
+      myPreds = {};
+      snap.forEach(d => rememberMyPrediction(d));
+      renderGames();
+      renderAllPicks();
     });
-    renderAllPicks();
-  });
+
+  // 30-second tick: re-checks lock state so per-game locked listeners spin
+  // up the moment a game crosses the lock threshold (without waiting for a
+  // games-collection update) and so countdowns in the card footer update.
+  if (lockTickInterval) clearInterval(lockTickInterval);
+  lockTickInterval = setInterval(() => {
+    syncLockedPredictionListeners();
+    renderGames();
+  }, 30 * 1000);
 }
 
 function stopListeners() {
-  if (unsubGames)    { unsubGames();    unsubGames = null; }
-  if (unsubBoard)    { unsubBoard();    unsubBoard = null; }
-  if (unsubAllPreds) { unsubAllPreds(); unsubAllPreds = null; }
+  if (unsubGames)   { unsubGames();   unsubGames = null; }
+  if (unsubBoard)   { unsubBoard();   unsubBoard = null; }
+  if (unsubMyPreds) { unsubMyPreds(); unsubMyPreds = null; }
+  if (lockTickInterval) { clearInterval(lockTickInterval); lockTickInterval = null; }
+  Object.values(lockedPredUnsubs).forEach(unsub => { try { unsub(); } catch (_) {} });
+  lockedPredUnsubs = {};
+  allGamePreds = {};
+}
+
+// One per-game listener for each currently locked-but-not-finished game.
+// Started/stopped as games cross the lock threshold so we never hold open
+// listeners we don't need (cost + DoS guard). Each listener uses
+// where('gameId','==',gid).limit(250) — within Firestore rule bounds.
+function syncLockedPredictionListeners() {
+  const lockedIds = new Set(Object.values(games)
+    .filter(g => {
+      const kick = g.kickoff.toDate().getTime();
+      return Date.now() >= kick - LOCK_MINUTES * 60 * 1000 && g.status !== 'finished';
+    })
+    .map(g => g.id));
+
+  // Tear down listeners for games no longer in the locked set
+  Object.keys(lockedPredUnsubs).forEach(gid => {
+    if (!lockedIds.has(gid)) {
+      try { lockedPredUnsubs[gid](); } catch (_) {}
+      delete lockedPredUnsubs[gid];
+      delete allGamePreds[gid];
+    }
+  });
+
+  // Start listeners for newly locked games
+  lockedIds.forEach(gid => {
+    if (lockedPredUnsubs[gid]) return;
+    lockedPredUnsubs[gid] = db.collection('predictions')
+      .where('gameId', '==', gid)
+      .limit(250)
+      .onSnapshot(snap => {
+        allGamePreds[gid] = {};
+        snap.forEach(d => {
+          const p = d.data();
+          allGamePreds[gid][p.userId] = { predHome: p.predHome, predAway: p.predAway };
+        });
+        renderAllPicks();
+      }, err => {
+        // Most likely the game just unlocked-by-finish or rules changed —
+        // not a security event. Log + skip.
+        console.warn('locked picks listener failed', gid, err.code || err.message);
+      });
+  });
+}
+
+// Best-effort dedupe by gameId — picks the deterministic-ID doc when present
+// (legacy random-ID docs may still exist until admin runs Recalculate Totals).
+function rememberMyPrediction(doc) {
+  const pred = { id: doc.id, ...doc.data() };
+  const preferredId = `${me.uid}_${pred.gameId}`;
+  const current = myPreds[pred.gameId];
+  if (!current) { myPreds[pred.gameId] = pred; return; }
+  if (pred.id === preferredId && current.id !== preferredId) { myPreds[pred.gameId] = pred; return; }
+  if (current.id === preferredId && pred.id !== preferredId) return;
+  const a = pred.updatedAt?.toMillis?.() || pred.createdAt?.toMillis?.() || 0;
+  const b = current.updatedAt?.toMillis?.() || current.createdAt?.toMillis?.() || 0;
+  if (a >= b) myPreds[pred.gameId] = pred;
 }
 
 async function refreshMyPreds() {
-  const snap = await db.collection('predictions')
-    .where('userId', '==', me.uid).get();
-  myPreds = {};
-  snap.forEach(d => { myPreds[d.data().gameId] = { id: d.id, ...d.data() }; });
+  // Kept as a no-op shim because gameCard / savePick still call it after
+  // a save. The real-time listener (unsubMyPreds) updates myPreds on its own.
+  return;
 }
 
 /* ════════════════════════════════════════
@@ -1500,18 +1621,25 @@ async function savePick(gid) {
   const predId = `${me.uid}_${gid}`;
 
   try {
-    await db.collection('predictions').doc(predId).set({
+    // The Firestore UPDATE rule requires createdAt to stay unchanged.
+    // Only include it when we are creating a new doc; for updates, omit it
+    // so merge:true preserves the existing value.
+    const payload = {
       userId: me.uid,
       gameId: gid,
       predHome: home,
       predAway: away,
       points: null,
       resultType: null,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+    };
+    const existing = myPreds[gid];
+    if (!existing || existing.id !== predId) {
+      payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+    }
+    await db.collection('predictions').doc(predId).set(payload, { merge: true });
     toast(`Pick saved: ${home} – ${away}`, 'ok');
-    await refreshMyPreds();
+    // The realtime listener (unsubMyPreds) will refresh myPreds + re-render.
     renderGames();
   } catch (e) {
     let msg = 'Error saving pick.';
@@ -1550,10 +1678,11 @@ function renderAllPicks() {
     return;
   }
 
-  // Sorted list of approved players
+  // Sorted list of players. publicProfiles only contains approved players
+  // (admin writes a profile on approve, deletes it on reject/revoke), so no
+  // filter is needed here — the collection itself IS the approved-list.
   const players = Object.entries(playerProfiles)
-    .filter(([, p]) => p.approved || p.isAdmin)
-    .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''));
+    .sort((a, b) => (a[1].displayName || a[1].name || '').localeCompare(b[1].displayName || b[1].name || ''));
 
   wrap.innerHTML = lockedGames.map(g => {
     const kick    = g.kickoff.toDate();
@@ -1570,7 +1699,7 @@ function renderAllPicks() {
           padding:9px 0;border-bottom:1px solid var(--border)">
           <span style="font-size:14px;font-weight:${isMe ? '800' : '600'};
             color:${isMe ? 'var(--green-l)' : 'white'}">
-            ${esc(profile.name || profile.email)}${isMe ? ' <span class="you-tag">YOU</span>' : ''}
+            ${esc(profile.displayName || profile.name || 'Player')}${isMe ? ' <span class="you-tag">YOU</span>' : ''}
           </span>
           <span style="font-size:15px;font-weight:700;color:${p ? 'white' : 'var(--muted)'}">
             ${p ? `${esc(p.predHome)} – ${esc(p.predAway)}` : '—'}
@@ -1625,7 +1754,7 @@ function renderBoard(users) {
     return `
       <div class="lb-row${isMe?' me':''}">
         <div class="lb-rank">${rank}</div>
-        <div class="lb-name">${esc(u.name||u.email)}${isMe?'<span class="you-tag">YOU</span>':''}</div>
+        <div class="lb-name">${esc(u.displayName || u.name || 'Player')}${isMe?'<span class="you-tag">YOU</span>':''}</div>
         <div class="lb-cell pts">${u.totalPoints||0}</div>
         <div class="lb-cell ex">⭐ ${u.exactScores||0}</div>
         <div class="lb-cell ot">✓ ${u.correctOutcomes||0}</div>
