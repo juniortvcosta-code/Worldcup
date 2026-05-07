@@ -148,6 +148,44 @@
       border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600;
     }
 
+    /* ── HEADER ROW (title + jackpot side-by-side on desktop) ── */
+    .pane-hdr-row {
+      display:flex; align-items:flex-start; justify-content:space-between;
+      gap:24px; flex-wrap:wrap; margin-bottom:18px;
+    }
+    .pane-hdr-row .page-hdr { margin-bottom:0; flex:1; min-width:240px; }
+
+    /* ── JACKPOT PANEL ────────────────────────────────
+       Display-only. No payment data is collected, stored, or processed
+       by this app — entries are settled by the game owner outside the app.
+       The numbers shown are computed client-side from the count of
+       approved players in /publicProfiles (already exposed). */
+    .jackpot-panel {
+      background:linear-gradient(135deg, rgba(255,215,0,.10), rgba(0,166,81,.10));
+      border:1px solid rgba(255,215,0,.30);
+      border-radius:14px; padding:14px 20px;
+      min-width:240px; max-width:340px; flex-shrink:0;
+      box-shadow:0 4px 20px rgba(255,215,0,.06);
+    }
+    .jackpot-label {
+      font-size:10px; font-weight:800; letter-spacing:1.2px;
+      text-transform:uppercase; color:var(--gold); margin-bottom:4px;
+      display:flex; align-items:center; gap:6px;
+    }
+    .jackpot-amount {
+      font-size:1.9rem; font-weight:800; color:white;
+      letter-spacing:-1px; line-height:1.1;
+    }
+    .jackpot-meta {
+      font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5;
+    }
+    .jackpot-meta strong { color:rgba(255,255,255,.85); font-weight:700; }
+    @media (max-width:640px) {
+      .pane-hdr-row { gap:14px; }
+      .jackpot-panel { min-width:0; max-width:none; width:100%; padding:12px 16px; }
+      .jackpot-amount { font-size:1.6rem; }
+    }
+
     /* ── DATE GROUPS ────────────────────────────────── */
     .date-grp { margin-bottom:32px; }
     .date-lbl {
@@ -963,9 +1001,21 @@
 
     <!-- PICKS pane -->
     <div class="tab-pane on" id="pane-picks">
-      <div class="page-hdr">
-        <h2>🎯 My Predictions</h2>
-        <p id="picks-subtitle">Pick scores for every match. Changes lock 5 min before kickoff.</p>
+      <div class="pane-hdr-row">
+        <div class="page-hdr">
+          <h2>🎯 My Predictions</h2>
+          <p id="picks-subtitle">Pick scores for every match. Changes lock 5 min before kickoff.</p>
+        </div>
+        <!-- Jackpot is computed client-side from the visible player count in
+             publicProfiles. No money is collected by this app; entries are
+             paid to the game owner outside the app. -->
+        <aside class="jackpot-panel" id="jackpot-panel" aria-live="polite">
+          <div class="jackpot-label">💰 Prize Pool</div>
+          <div class="jackpot-amount" id="jackpot-amount">$0</div>
+          <div class="jackpot-meta" id="jackpot-meta">
+            <strong>0</strong> players · $20 entry · 90% paid out
+          </div>
+        </aside>
       </div>
       <div class="legend">
         <div class="legend-item">
@@ -1259,6 +1309,7 @@ function startListeners() {
         users.push({ id: d.id, ...d.data() });
       });
       renderBoard(users);
+      renderJackpot(users.length);
       renderAllPicks();
     });
 
@@ -1735,6 +1786,33 @@ function renderAllPicks() {
         </div>
       </div>`;
   }).join('');
+}
+
+/* ════════════════════════════════════════
+   JACKPOT (display only)
+════════════════════════════════════════
+   No money is collected, stored, or processed by this app. The numbers below
+   are computed locally from the count of approved /publicProfiles documents
+   (which we already subscribe to for the leaderboard).
+   The game owner collects the entry fee outside the app and pays the prize
+   pool out manually. Editing these constants does NOT change anyone's
+   balance — it just changes what your screen shows. */
+const ENTRY_FEE_USD       = 20; // each player pays the owner outside the app
+const HOUSE_CUT_PERCENT   = 10; // owner keeps this share; the rest is the pot
+
+function renderJackpot(playerCount) {
+  // Defensive: clamp to a non-negative integer regardless of caller.
+  const n = Math.max(0, Math.floor(Number(playerCount) || 0));
+  const totalCollected = n * ENTRY_FEE_USD;
+  const ownerCut       = Math.floor(totalCollected * HOUSE_CUT_PERCENT / 100);
+  const prizePool      = totalCollected - ownerCut;
+  // textContent (not innerHTML) — no escaping needed and no XSS surface
+  // even if these constants ever pulled from elsewhere in the future.
+  const amtEl  = el('jackpot-amount');
+  const metaEl = el('jackpot-meta');
+  if (amtEl)  amtEl.textContent  = `$${prizePool.toLocaleString('en-US')}`;
+  if (metaEl) metaEl.textContent =
+    `${n} player${n === 1 ? '' : 's'} · $${ENTRY_FEE_USD} entry · ${100 - HOUSE_CUT_PERCENT}% paid out`;
 }
 
 /* ════════════════════════════════════════
