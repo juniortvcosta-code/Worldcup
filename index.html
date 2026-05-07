@@ -1712,10 +1712,10 @@ function renderAllPicks() {
     return `
       <div class="gcard" style="margin-bottom:16px">
         <div class="gmeta">
-          <span class="phase-badge">${g.phase || 'Group Stage'}</span>
-          ${g.group ? `<span class="dot3"></span><span>${g.group}</span>` : ''}
+          <span class="phase-badge">${esc(g.phase || 'Group Stage')}</span>
+          ${g.group ? `<span class="dot3"></span><span>${esc(g.group)}</span>` : ''}
           <span class="dot3"></span><span>${timeStr}</span>
-          ${g.venue ? `<span class="dot3"></span><span>${g.venue}</span>` : ''}
+          ${g.venue ? `<span class="dot3"></span><span>${esc(g.venue)}</span>` : ''}
           <span class="dot3"></span>
           <span style="color:var(--muted)">${picksCount}/${players.length} picks submitted</span>
         </div>
