@@ -708,12 +708,12 @@
       border: 1.5px solid var(--border); background: var(--surface);
       cursor: pointer; font-family: inherit; transition: all .2s; min-width: 72px;
     }
-    .dtab:hover:not(.on):not(.past) { border-color: rgba(255,255,255,.25); }
+    .dtab:hover:not(.on) { border-color: rgba(255,255,255,.25); }
     .dtab.on {
       background: var(--green); border-color: var(--green);
       box-shadow: 0 4px 16px rgba(0,166,81,.35);
     }
-    .dtab.past { opacity: .38; cursor: default; pointer-events: none; }
+    .dtab.past { opacity: .7; }
     .dtab.today:not(.on) { border-color: var(--teal); }
     .dtab-day, .dtab-month {
       font-size: 10px; font-weight: 700;
@@ -1459,7 +1459,7 @@ function renderGames() {
       const day = d.toLocaleDateString('en-US', { weekday: 'short' });
       const num = d.getDate();
       const mon = d.toLocaleDateString('en-US', { month: 'short' });
-      return `<button class="${cls}" onclick="selectGameDate('${key}')"${isPast ? ' disabled' : ''}>
+      return `<button class="${cls}" onclick="selectGameDate('${key}')">
         <span class="dtab-day">${day}</span>
         <span class="dtab-num">${num}</span>
         <span class="dtab-month">${mon}</span>
