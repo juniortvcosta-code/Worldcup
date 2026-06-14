@@ -1496,8 +1496,11 @@ function gameCard(g) {
   const done   = g.status === 'finished';
   const pred   = myPreds[g.id];
 
-  // Initialize score input state from existing prediction
-  if (!scores[g.id]) {
+  // Initialize score input state from existing prediction.
+  // Re-seed if the cached state is the default 0-0 and a saved pick has
+  // since arrived from the listener — fixes the post-login "shows 0-0
+  // even though the pick is saved" race.
+  if (!scores[g.id] || (pred && scores[g.id].home === 0 && scores[g.id].away === 0 && pred.predHome + pred.predAway > 0)) {
     scores[g.id] = { home: pred ? pred.predHome : 0, away: pred ? pred.predAway : 0 };
   }
   const { home: ph, away: pa } = scores[g.id];
